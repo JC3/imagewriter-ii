@@ -57,6 +57,12 @@ class ImageWriterII:
     def path (self) -> str:
         return self._path
 
+    def __enter__ (self) -> "ImageWriterII":
+        return self
+
+    def __exit__ (self, extype, exval, exstack) -> None:
+        self.close()
+
     # ========== Basic functions ==========
 
     def _write (self, data: str) -> None:
