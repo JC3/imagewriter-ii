@@ -103,8 +103,8 @@ class ImageWriterII:
     def reset (self) -> None:
         self.command("c")
 
-    def softReset (self, quality: Quality = None) -> None:
-        if quality != None:
+    def softReset (self, quality: Optional[Quality] = None) -> None:
+        if quality is not None:
             self.setQuality(quality);
         self.setFont(Font.ELITE);
         self.setDoubleWidth(False);
@@ -175,10 +175,10 @@ class ImageWriterII:
         self.command(self._padcheck("F", dots, 4, 0, 9999, "Print head position"))
 
     def setLineSpacing (self, spacing: Union[LineSpacing,int]) -> None:
-        if spacing == LineSpacing.LPI6 or spacing == LineSpacing.LPI8:
-            self.command(spacing.value)
-        elif type(spacing) == int:
+        if type(spacing) == int:
             self.command(self._padcheck("T", spacing, 2, 1, 99, "Line spacing"))
+        elif type(spacing) == LineSpacing:
+            self.command(spacing.value)
         else:
             raise TypeError("Line spacing must be a LineSpacing Enum or an int.")
 
@@ -200,7 +200,7 @@ class ImageWriterII:
     def feedLines (self, count: int) -> None:
         if count == 0:
             return
-        elif count > 15:
+        elif count < 1 or count > 15:
             raise ValueError("Line count must be from 1 to 15.")
         countstr = [ "1", "2", "3", "4", "5", "6", "7", "8", "9", ":", ";", "<", "=", ">", "?" ]
         self.command("\x1f" + countstr[count-1])
