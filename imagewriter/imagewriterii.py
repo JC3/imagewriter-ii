@@ -1,12 +1,23 @@
 import logging
 from enum import Enum
 from binascii import hexlify
+import dataclasses
+import re
 import serial
 
 from typing import Optional, Union
 
+from .errors import NoPrinterDetectedError
+
 
 _PRINTER_CHARSET = "latin1" # latin1 isn't quite right but probably good enough for now...
+
+
+@dataclasses.dataclass
+class PrinterInfo:
+    cartridge_width: float
+    is_color: bool
+    has_sheet_feeder: bool
 
 
 class Font (Enum):
@@ -36,7 +47,7 @@ class LineSpacing (Enum):
 
 class ImageWriterII:
 
-    def __init__ (self, path: str, logger: Optional[logging.Logger] = None):
+    def __init__ (self, path: str, logger: Optional[logging.Logger] = None, validate=True):
         self._logger = logger or logging.getLogger("imagewriter-ii")
         self._path = path
         if path == "-":
@@ -52,6 +63,10 @@ class ImageWriterII:
                 dsrdtr=True
             )
             self._logger.info("Opened printer on " + path)
+            if validate:
+                info = self.queryInfo()
+                if info.is_color:
+                    raise UnsupportedPrinterError("Color ribbons are not yet supported by this library.")
 
     @property
     def path (self) -> str:
@@ -68,6 +83,15 @@ class ImageWriterII:
     def _write (self, data: str) -> None:
         if self._port is not None:
             self._port.write(data.encode(_PRINTER_CHARSET))
+
+    def _readline (self, timeout: float) -> str:
+        if self._port is not None:
+            self._port.timeout = timeout
+            data = self._port.read_until(b"\x0d")
+            self._logger.debug("read:    " + str(hexlify(data, " ")))
+            return data.decode(_PRINTER_CHARSET)[:-1]
+        else:
+            return ""
 
     def write (self, data: str) -> None:
         self._logger.debug("raw:     " + str(hexlify(data.encode(_PRINTER_CHARSET), " ")))
@@ -195,7 +219,7 @@ class ImageWriterII:
         self.command("v")
 
     def feedToTOF (self) -> None:
-        self.write("\x0c") # TODO: not sure if this is correct, check printer docs
+        self.write("\x0c")
 
     def feedLines (self, count: int) -> None:
         if count == 0:
@@ -204,3 +228,25 @@ class ImageWriterII:
             raise ValueError("Line count must be from 1 to 15.")
         countstr = [ "1", "2", "3", "4", "5", "6", "7", "8", "9", ":", ";", "<", "=", ">", "?" ]
         self.command("\x1f" + countstr[count-1])
+
+    def queryId (self, timeout: float = 5.0) -> str:
+        self.command("?")
+        return self._readline(timeout)
+
+    @staticmethod
+    def parseId (idstr: str) -> Optional[PrinterInfo]:
+        m = re.fullmatch(r"^IW([0-9]+)(C?)(F?)", idstr)
+        return PrinterInfo(
+            cartridge_width=float(m.group(1)),
+            is_color=(m.group(2) == "C"),
+            has_sheet_feeder=(m.group(3) == "F")
+        ) if m else None
+
+    def queryInfo (self, timeout: float = 5.0) -> PrinterInfo:
+        if self._port is None: # then fake it
+            return PrinterInfo(cartridge_width=10.0, is_color=False, has_sheet_feeder=False)
+        info = ImageWriterII.parseId(self.queryId(timeout))
+        if info is None:
+            raise NoPrinterFoundError(f"Device at {self._path} is not an ImageWriter II.")
+        else:
+            return info

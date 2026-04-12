@@ -1,2 +1,2 @@
-from .imagewriterii import Font, Quality, LineSpacing
-from .imagewriterii import ImageWriterII
+from .imagewriterii import PrinterInfo, Font, Quality, LineSpacing, ImageWriterII
+from .errors import NoPrinterDetectedError
