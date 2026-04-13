@@ -1,5 +1,4 @@
-imagewriter-ii
-###
+# imagewriter-ii
 
 This is a Python library for controlling the Apple ImageWriter II printer.
 
@@ -7,8 +6,13 @@ It is not a 100% complete command set, but includes a number of commonly used co
 for printing text and images. If there are any additional commands you would like to
 see support for, feel free to post in the GitHub issues list.
 
-(Un)license
-##
+This library currently does not support color ribbons.
+
+Documentation does not exist yet so you will have to look at the code and the examples
+in *imagewriter/tests*.
+
+## (Un)license
+
 
 ```
 This is free and unencumbered software released into the public domain.
