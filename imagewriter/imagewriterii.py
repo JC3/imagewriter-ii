@@ -8,7 +8,7 @@ import numpy as np
 
 from typing import Optional, Union
 
-from .errors import NoPrinterDetectedError
+from .errors import NoPrinterDetectedError, UnsupportedPrinterError
 
 
 _PRINTER_CHARSET = "latin1" # latin1 isn't quite right but probably good enough for now...
@@ -84,7 +84,7 @@ class ImageWriterII:
 
     # ========== Basic functions ==========
 
-    def _write (self, data: Union[str,bytes]) -> None:
+    def _write (self, data: Union[str,bytes,bytearray]) -> None:
         if self._port is not None:
             if isinstance(data, str):
                 data = data.encode(_PRINTER_CHARSET)
@@ -280,24 +280,24 @@ class ImageWriterII:
         if blankline: # just discard all data if line is blank, improves performance
             line = bytearray()
         line.extend(b"\r\n")
-        return bytes(line)
+        return line
 
     @staticmethod
-    def _encodeImage72 (image: np.ndarray) -> bytes:
+    def _encodeImage72 (image: np.ndarray) -> bytearray:
         data = bytearray(b"\x1bT16")
         for y in range(0, image.shape[0], 8):
             data.extend(ImageWriterII._encodeRows(image, y, 1))
-        return bytes(data)
+        return data
 
     @staticmethod
-    def _encodeImage144 (image: np.ndarray) -> bytes:
+    def _encodeImage144 (image: np.ndarray) -> bytearray:
         data = bytearray()
         for y in range(0, image.shape[0], 16):
             data.extend(b"\x1bT01")
             data.extend(ImageWriterII._encodeRows(image, y, 2))
             data.extend(b"\x1bT15")
             data.extend(ImageWriterII._encodeRows(image, y + 1, 2))
-        return bytes(data)
+        return data
 
     def printImage (self, image: np.ndarray, hdpi: int, vdpi: int, xinch: float) -> None:
         # note: on return the following printer settings have been modified:
