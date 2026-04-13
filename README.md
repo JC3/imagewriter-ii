@@ -11,6 +11,28 @@ This library currently does not support color ribbons.
 Documentation does not exist yet so you will have to look at the code and the examples
 in *imagewriter/tests*.
 
+## Basic Usage
+
+You construct an `imagewriter.ImageWriterII` with, at minimum, the name or path of the
+serial port the printer is attached to. You can do it like this:
+
+```
+printer = ImageWriterII("/dev/ttyUSB0")  # or say "COM2" on Windows, etc.
+# do stuff
+printer.close()
+```
+
+Or you can use it as a context manager, in which case `close` will be called automatically:
+
+```
+with ImageWriterII("/dev/ttyUSB0") as printer:
+    ...
+```
+
+By default the printer is opened at 9600 baud but you can specify different
+baud rates with the `baud` keyword argument to the constructor, just make sure
+it matches the DIP switch settings on the printer.
+
 ## (Un)license
 
 
