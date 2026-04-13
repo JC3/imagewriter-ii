@@ -4,6 +4,7 @@ from binascii import hexlify
 import dataclasses
 import re
 import serial
+import numpy as np
 
 from typing import Optional, Union
 
@@ -15,7 +16,7 @@ _PRINTER_CHARSET = "latin1" # latin1 isn't quite right but probably good enough 
 
 @dataclasses.dataclass
 class PrinterInfo:
-    cartridge_width: float
+    carriage_width: float
     is_color: bool
     has_sheet_feeder: bool
 
@@ -47,7 +48,10 @@ class LineSpacing (Enum):
 
 class ImageWriterII:
 
-    def __init__ (self, path: str, logger: Optional[logging.Logger] = None, validate=True):
+    def __init__ (self, path: str, *,
+                  logger: Optional[logging.Logger] = None,
+                  validate: bool = True,
+                  baud: int = 9600):
         self._logger = logger or logging.getLogger("imagewriter-ii")
         self._path = path
         if path == "-":
@@ -56,13 +60,13 @@ class ImageWriterII:
         else:
             self._port = serial.Serial(
                 port=path,
-                baudrate=9600,
+                baudrate=baud,
                 bytesize=serial.EIGHTBITS,
                 parity=serial.PARITY_NONE,
                 stopbits=serial.STOPBITS_ONE,
                 dsrdtr=True
             )
-            self._logger.info("Opened printer on " + path)
+            self._logger.info(f"Opened printer on {path} at {baud} baud.")
             if validate:
                 info = self.queryInfo()
                 if info.is_color:
@@ -80,9 +84,11 @@ class ImageWriterII:
 
     # ========== Basic functions ==========
 
-    def _write (self, data: str) -> None:
+    def _write (self, data: Union[str,bytes]) -> None:
         if self._port is not None:
-            self._port.write(data.encode(_PRINTER_CHARSET))
+            if isinstance(data, str):
+                data = data.encode(_PRINTER_CHARSET)
+            self._port.write(data)
 
     def _readline (self, timeout: float) -> str:
         if self._port is not None:
@@ -199,9 +205,9 @@ class ImageWriterII:
         self.command(self._padcheck("F", dots, 4, 0, 9999, "Print head position"))
 
     def setLineSpacing (self, spacing: Union[LineSpacing,int]) -> None:
-        if type(spacing) == int:
+        if isinstance(spacing, int):
             self.command(self._padcheck("T", spacing, 2, 1, 99, "Line spacing"))
-        elif type(spacing) == LineSpacing:
+        elif isinstance(spacing, LineSpacing):
             self.command(spacing.value)
         else:
             raise TypeError("Line spacing must be a LineSpacing Enum or an int.")
@@ -237,16 +243,109 @@ class ImageWriterII:
     def parseId (idstr: str) -> Optional[PrinterInfo]:
         m = re.fullmatch(r"^IW([0-9]+)(C?)(F?)", idstr)
         return PrinterInfo(
-            cartridge_width=float(m.group(1)),
+            carriage_width=float(m.group(1)),
             is_color=(m.group(2) == "C"),
             has_sheet_feeder=(m.group(3) == "F")
         ) if m else None
 
     def queryInfo (self, timeout: float = 5.0) -> PrinterInfo:
         if self._port is None: # then fake it
-            return PrinterInfo(cartridge_width=10.0, is_color=False, has_sheet_feeder=False)
+            return PrinterInfo(carriage_width=10.0, is_color=False, has_sheet_feeder=False)
         info = ImageWriterII.parseId(self.queryId(timeout))
         if info is None:
-            raise NoPrinterFoundError(f"Device at {self._path} is not an ImageWriter II.")
+            raise NoPrinterDetectedError(f"Device at {self._path} is not an ImageWriter II.")
         else:
             return info
+
+    # ========== The whole point of these printers ==========
+
+    @staticmethod
+    def _padcommand (code: str, n: int, length: int) -> bytes:
+        return b"\x1b" + ImageWriterII._pad(code, n, length).encode(_PRINTER_CHARSET)
+
+    @staticmethod
+    def _encodeRows (image: np.ndarray, y: int, ystep: int) -> bytearray:
+        blankline = True
+        line = bytearray(ImageWriterII._padcommand("G", image.shape[1], 4))
+        for x in range(0, image.shape[1]):
+            bdata = 0
+            for yoff in range(8):
+                yy = y + yoff * ystep
+                black = (image[yy][x][0] < 128) if yy < image.shape[0] else False
+                if black:
+                    bdata = bdata | (1 << yoff)
+            if bdata:
+                blankline = False
+            line.append(bdata)
+        if blankline: # just discard all data if line is blank, improves performance
+            line = bytearray()
+        line.extend(b"\r\n")
+        return bytes(line)
+
+    @staticmethod
+    def _encodeImage72 (image: np.ndarray) -> bytes:
+        data = bytearray(b"\x1bT16")
+        for y in range(0, image.shape[0], 8):
+            data.extend(ImageWriterII._encodeRows(image, y, 1))
+        return bytes(data)
+
+    @staticmethod
+    def _encodeImage144 (image: np.ndarray) -> bytes:
+        data = bytearray()
+        for y in range(0, image.shape[0], 16):
+            data.extend(b"\x1bT01")
+            data.extend(ImageWriterII._encodeRows(image, y, 2))
+            data.extend(b"\x1bT15")
+            data.extend(ImageWriterII._encodeRows(image, y + 1, 2))
+        return bytes(data)
+
+    def printImage (self, image: np.ndarray, hdpi: int, vdpi: int, xinch: float) -> None:
+        # note: on return the following printer settings have been modified:
+        # - font
+        # - line spacing
+        # - double-width mode
+        # - bold mode
+        # - unidirectional print mode
+        # - left margin
+
+        HDPI_FONT = {
+            72: Font.EXTENDED,
+            80: Font.PICA,
+            96: Font.ELITE,
+            107: Font.SEMICONDENSED,
+            120: Font.CONDENSED,
+            136: Font.ULTRACONDENSED,
+            144: Font.PROPORTIONAL_PICA,
+            160: Font.PROPORTIONAL_ELITE
+        }
+
+        VDPI_ENCODE = {
+            72: ImageWriterII._encodeImage72,
+            144: ImageWriterII._encodeImage144
+        }
+
+        hdpi = round(hdpi) # we are documented as taking ints but let's be nice
+        vdpi = round(vdpi) # and accept floats anyways.
+
+        if image.ndim == 2:
+            image = image.reshape((image.shape[0], image.shape[1], 1))
+        elif image.ndim != 3:
+            raise ValueError(f"Unsupported image array shape {image.shape}.")
+        if image.shape[0] == 0 or image.shape[1] == 0 or image.shape[2] == 0:
+            return
+        if image.shape[1] > 9999:
+            raise ValueError(f"Image too large.")
+
+        if hdpi not in HDPI_FONT:
+            raise ValueError(f"Unsupported horizontal resolution {hdpi}.")
+        if vdpi not in VDPI_ENCODE:
+            raise ValueError(f"Unsupported vertical resolution {vdpi}.")
+
+        self.setUnidirectional(True) # for best alignment between rows
+        self.setBold(False)
+        self.setDoubleWidth(False)
+        self.setFont(Font.ULTRACONDENSED) # 17 columns per inch
+        self.setLeftMargin(max(0, min(999, round(17.0 * xinch))))
+        self.setFont(HDPI_FONT[hdpi])
+
+        self._write(VDPI_ENCODE[vdpi](image))

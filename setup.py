@@ -6,8 +6,14 @@ setup(
     packages=find_namespace_packages(include="imagewriter*"),
     python_requires=">=3",
     install_requires=[
-        "pyserial"
+        "pyserial",
+        "numpy",
     ],
+    extras_require={
+        "tests": [
+            "pillow",
+        ],
+    },
     entry_points="""
         [console_scripts]
     """,
