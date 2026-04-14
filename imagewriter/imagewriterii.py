@@ -304,7 +304,6 @@ class ImageWriterII:
         # - font
         # - line spacing
         # - double-width mode
-        # - bold mode
         # - unidirectional print mode
         # - left margin
 
@@ -342,7 +341,6 @@ class ImageWriterII:
             raise ValueError(f"Unsupported vertical resolution {vdpi}.")
 
         self.setUnidirectional(True) # for best alignment between rows
-        self.setBold(False)
         self.setDoubleWidth(False)
         self.setFont(Font.ULTRACONDENSED) # 17 columns per inch
         self.setLeftMargin(max(0, min(999, round(17.0 * xinch))))
