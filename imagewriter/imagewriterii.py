@@ -64,7 +64,7 @@ class ImageWriterII:
                 bytesize=serial.EIGHTBITS,
                 parity=serial.PARITY_NONE,
                 stopbits=serial.STOPBITS_ONE,
-                dsrdtr=True
+                xonxoff=True
             )
             self._logger.info(f"Opened printer on {path} at {baud} baud.")
             if validate:
